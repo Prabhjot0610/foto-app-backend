@@ -138,5 +138,27 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     res.status(500).json({ msg: 'Errore del server' });
   }
 });
+// Rotta per modificare titolo e descrizione di una foto
+router.put('/:id', autenticaToken, async (req, res) => {
+  const { id } = req.params;
+  const { titolo, descrizione } = req.body;
+
+  try {
+    // Aggiorna solo se la foto appartiene all'utente loggato
+    const result = await pool.query(
+      'UPDATE photos SET titolo = $1, descrizione = $2 WHERE id = $3 AND user_id = $4 RETURNING *',
+      [titolo, descrizione, id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(403).json({ error: 'Non sei autorizzato a modificare questo post o il post non esiste.' });
+    }
+
+    res.json({ message: 'Post aggiornato con successo!', photo: result.rows[0] });
+  } catch (err) {
+    console.error('Errore aggiornamento foto:', err);
+    res.status(500).json({ error: 'Errore del server durante la modifica.' });
+  }
+});
 
 module.exports = router;
