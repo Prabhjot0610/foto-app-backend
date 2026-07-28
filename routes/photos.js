@@ -1,14 +1,14 @@
-const express = require('express');
-const router = express.Router();
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const sharp = require('sharp'); // ⚡ Importato Sharp
-const pool = require('../config/db');
-const authMiddleware = require('../middleware/auth');
+import { Router } from 'express';
+const router = Router();
+import multer, { memoryStorage } from 'multer';
+import { join } from 'path';
+import { existsSync, unlinkSync } from 'fs';
+import sharp from 'sharp'; // ⚡ Importato Sharp
+import { query } from '../config/db';
+import authMiddleware from '../middleware/auth';
 
 // Salvataggio temporaneo in memoria per la compressione
-const storage = multer.memoryStorage();
+const storage = memoryStorage();
 const upload = multer({ storage });
 
 // Upload Foto con Compressione Automaticamente
@@ -17,7 +17,7 @@ router.post('/upload', authMiddleware, upload.single('immagine'), async (req, re
     if (!req.file) return res.status(400).json({ msg: 'Nessun file selezionato' });
 
     const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
-    const outputPath = path.join(__dirname, '..', 'uploads', filename);
+    const outputPath = join(__dirname, '..', 'uploads', filename);
 
     // ⚡ Compressione dell'immagine con Sharp (ridimensionamento max 1200px, qualità 80%)
     await sharp(req.file.buffer)
@@ -28,12 +28,12 @@ router.post('/upload', authMiddleware, upload.single('immagine'), async (req, re
     const urlImmagine = `/uploads/${filename}`;
     const descrizione = req.body.descrizione || '';
 
-    const newPhoto = await pool.query(
+    const newPhoto = await query(
       'INSERT INTO foto (url_immagine, descrizione, utente_id) VALUES ($1, $2, $3) RETURNING *',
       [urlImmagine, descrizione, req.utente.id]
     );
 
-    await pool.query(
+    await query(
       'INSERT INTO registro_attivita (utente_nome, azione, dettagli) VALUES ($1, $2, $3)',
       [req.utente.nome, 'UPLOAD_FOTO', `Caricata nuova foto ID: ${newPhoto.rows[0].id}`]
     );
@@ -48,7 +48,7 @@ router.post('/upload', authMiddleware, upload.single('immagine'), async (req, re
 // GET foto con Like
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const photos = await pool.query(`
+    const photos = await query(`
       SELECT 
         f.id, 
         f.url_immagine, 
@@ -78,24 +78,24 @@ router.post('/:id/like', authMiddleware, async (req, res) => {
   const utenteId = req.utente.id;
 
   try {
-    const checkLike = await pool.query(
+    const checkLike = await query(
       'SELECT * FROM like_foto WHERE foto_id = $1 AND utente_id = $2',
       [fotoId, utenteId]
     );
 
     if (checkLike.rows.length > 0) {
-      await pool.query(
+      await query(
         'DELETE FROM like_foto WHERE foto_id = $1 AND utente_id = $2',
         [fotoId, utenteId]
       );
       res.json({ liked: false });
     } else {
-      await pool.query(
+      await query(
         'INSERT INTO like_foto (foto_id, utente_id) VALUES ($1, $2)',
         [fotoId, utenteId]
       );
 
-      await pool.query(
+      await query(
         'INSERT INTO registro_attivita (utente_nome, azione, dettagli) VALUES ($1, $2, $3)',
         [req.utente.nome, 'LIKE_FOTO', `Ha messo Mi Piace alla foto ID: ${fotoId}`]
       );
@@ -112,7 +112,7 @@ router.post('/:id/like', authMiddleware, async (req, res) => {
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const fotoId = req.params.id;
-    const photoQuery = await pool.query('SELECT * FROM foto WHERE id = $1', [fotoId]);
+    const photoQuery = await query('SELECT * FROM foto WHERE id = $1', [fotoId]);
 
     if (photoQuery.rows.length === 0) return res.status(404).json({ msg: 'Foto non trovata' });
 
@@ -122,12 +122,12 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       return res.status(403).json({ msg: 'Non autorizzato' });
     }
 
-    await pool.query('DELETE FROM foto WHERE id = $1', [fotoId]);
+    await query('DELETE FROM foto WHERE id = $1', [fotoId]);
 
-    const filePath = path.join(__dirname, '..', foto.url_immagine);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const filePath = join(__dirname, '..', foto.url_immagine);
+    if (existsSync(filePath)) unlinkSync(filePath);
 
-    await pool.query(
+    await query(
       'INSERT INTO registro_attivita (utente_nome, azione, dettagli) VALUES ($1, $2, $3)',
       [req.utente.nome, req.utente.ruolo === 'admin' ? 'ELIMINAZIONE_FOTO_ADMIN' : 'ELIMINAZIONE_FOTO', `Eliminata foto ID: ${fotoId}`]
     );
@@ -139,13 +139,13 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   }
 });
 // Rotta per modificare titolo e descrizione di una foto
-router.put('/:id', autenticaToken, async (req, res) => {
+router.put('/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
   const { titolo, descrizione } = req.body;
 
   try {
     // Aggiorna solo se la foto appartiene all'utente loggato
-    const result = await pool.query(
+    const result = await query(
       'UPDATE photos SET titolo = $1, descrizione = $2 WHERE id = $3 AND user_id = $4 RETURNING *',
       [titolo, descrizione, id, req.user.id]
     );
@@ -161,4 +161,4 @@ router.put('/:id', autenticaToken, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
