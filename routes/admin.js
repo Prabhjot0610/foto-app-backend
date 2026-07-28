@@ -17,13 +17,18 @@ const adminOnly = (req, res, next) => {
 // @desc    Ottieni il registro di tutte le attività (Solo Admin)
 router.get('/logs', authMiddleware, adminOnly, async (req, res) => {
   try {
+    // Ordiniamo per id DESC così non va in crash se la colonna data ha un nome diverso
     const logs = await pool.query(
-      'SELECT * FROM registro_attivita ORDER BY data_creazione DESC LIMIT 100'
+      'SELECT * FROM registro_attivita ORDER BY id DESC LIMIT 100'
     );
     res.json(logs.rows);
   } catch (err) {
-    console.error('Errore recupero log:', err.message);
-    res.status(500).send('Errore del server durante il recupero dei log');
+    // Questo consolle.error spunta subito nei log con i dettagli esatti!
+    console.error('🔥 ERRORE CRITICO REGISTRO LOGS:', err);
+    res.status(500).json({ 
+      error: 'Errore del server', 
+      dettaglio: err.message 
+    });
   }
 });
 
