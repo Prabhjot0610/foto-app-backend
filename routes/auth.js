@@ -4,7 +4,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 
-const JWT_SECRET = 'chiave_segreta_super_sicura_foto_app_123!';
+// Usa la variabile d'ambiente se presente, altrimenti il fallback
+const JWT_SECRET = process.env.JWT_SECRET || 'VECCHI_RICORDI';
 
 // 1. Registrazione Utente
 router.post('/register', async (req, res) => {
@@ -95,7 +96,14 @@ router.post('/login', async (req, res) => {
 
 // 3. Verifica del Token salvato per il Login Persistente
 router.get('/me', async (req, res) => {
-  const token = req.headers['x-auth-token'];
+  // Cerca sia in Authorization (Bearer) che in x-auth-token
+  const authHeader = req.headers['authorization'];
+  let token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    token = req.headers['x-auth-token'];
+  }
+
   if (!token) return res.status(401).json({ msg: 'Nessun token' });
 
   try {
