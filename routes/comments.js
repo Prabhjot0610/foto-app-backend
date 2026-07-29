@@ -52,11 +52,11 @@ router.post('/', authMiddleware, async (req, res) => {
 router.get('/:foto_id', authMiddleware, async (req, res) => {
   try {
     const comments = await pool.query(
-      `SELECT commenti.id, commenti.testo, commenti.data_creazione, commenti.utente_id, utenti.nome AS autore
+      `SELECT commenti.id, commenti.testo, commenti.data_ora commenti.utente_id, utenti.nome AS autore
        FROM commenti
        JOIN utenti ON commenti.utente_id = utenti.id
        WHERE commenti.foto_id = $1
-       ORDER BY commenti.data_creazione ASC`,
+       ORDER BY commenti.data_ora ASC`,
       [req.params.foto_id]
     );
 
