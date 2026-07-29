@@ -14,47 +14,62 @@ const upload = multer({ storage });
 // 1. Upload Foto con Compressione
 router.post('/upload', authMiddleware, upload.single('immagine'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ msg: 'Nessun file selezionato' });
+    if (!req.file) {
+      return res.status(400).json({ msg: 'Nessun file selezionato' });
+    }
 
     const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
     const uploadsDir = path.join(__dirname, '..', 'uploads');
 
-    // Crea la cartella uploads se non esiste
+    //Assicurati che la cartella /uploads esista
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
 
     const outputPath = path.join(uploadsDir, filename);
 
-    // Compressione dell'immagine con Sharp
-    await sharp(req.file.buffer)
-      .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 80 })
-      .toFile(outputPath);
+    //Tenta la compressione con Sharp, fallback sul buffer standard se fallisce
+    try {
+      await sharp(req.file.buffer)
+        .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toFile(outputPath);
+    } catch (sharpErr) {
+      console.error('⚠️ Sharp compression failed, saving original buffer:', sharpErr.message);
+      fs.writeFileSync(outputPath, req.file.buffer);
+    }
 
     const urlImmagine = `/uploads/${filename}`;
     const descrizione = req.body.descrizione || '';
-    const utenteId = req.utente ? req.utente.id : req.user.id;
-    const utenteNome = req.utente ? req.utente.nome : req.user.nome;
+    
+    // Recupero dati utente con fallback sicuri
+    const utenteObj = req.utente || req.user || {};
+    const utenteId = utenteObj.id;
+    const utenteNome = utenteObj.nome || utenteObj.username || 'Utente Sconosciuto';
 
+    if (!utenteId) {
+      return res.status(401).json({ msg: 'Utente non identificato nel token' });
+    }
+
+    //Inserimento nel database della Foto
     const newPhoto = await pool.query(
       'INSERT INTO foto (url_immagine, descrizione, utente_id) VALUES ($1, $2, $3) RETURNING *',
       [urlImmagine, descrizione, utenteId]
     );
 
-    // Log Attività in try-catch separato per evitare il blocco in caso di discrepanze DB
+    //Inserimento del Log (in try-catch isolato)
     try {
       await pool.query(
         'INSERT INTO registro_attivita (utente_nome, azione, dettagli) VALUES ($1, $2, $3)',
         [utenteNome, 'UPLOAD_FOTO', `Caricata nuova foto ID: ${newPhoto.rows[0].id}`]
       );
     } catch (logErr) {
-      console.error('Errore durante la scrittura del log:', logErr.message);
+      console.error('⚠️ Errore salvataggio log (ignorato):', logErr.message);
     }
 
     res.json(newPhoto.rows[0]);
   } catch (err) {
-    console.error('Errore caricamento foto:', err.message);
+    console.error('🔥 Errore critico Upload Foto:', err);
     res.status(500).json({ msg: 'Errore del server durante il caricamento foto', dettaglio: err.message });
   }
 });
