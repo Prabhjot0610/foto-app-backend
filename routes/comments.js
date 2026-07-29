@@ -12,42 +12,29 @@ router.post('/', authMiddleware, async (req, res) => {
     return res.status(400).json({ msg: 'Testo del commento e foto_id sono obbligatori' });
   }
 
-  // Supporto per sia req.utente che req.user
-  const utenteObj = req.utente || req.user || {};
-  const utenteId = utenteObj.id;
-  const utenteNome = utenteObj.nome || utenteObj.username || 'Utente Sconosciuto';
-
-  if (!utenteId) {
-    return res.status(401).json({ msg: 'Utente non autenticato' });
-  }
-
   try {
     const newComment = await pool.query(
       `INSERT INTO commenti (testo, foto_id, utente_id) 
        VALUES ($1, $2, $3) 
-       RETURNING id, testo, foto_id, utente_id`,
-      [testo.trim(), foto_id, utenteId]
+       RETURNING id, testo, data_creazione, foto_id, utente_id`,
+      [testo.trim(), foto_id, req.utente.id]
     );
 
     const commentWithUser = {
       ...newComment.rows[0],
-      autore: utenteNome
+      autore: req.utente.nome
     };
 
-    // Log Attività in try-catch isolato
-    try {
-      await pool.query(
-        'INSERT INTO registro_attivita (utente_nome, azione, dettagli) VALUES ($1, $2, $3)',
-        [utenteNome, 'NUOVO_COMMENTO', `Ha commentato la foto ID: ${foto_id}`]
-      );
-    } catch (logErr) {
-      console.error('⚠️ Log commento fallito (ignorato):', logErr.message);
-    }
+    // Log Attività
+    await pool.query(
+      'INSERT INTO registro_attivita (utente_nome, azione, dettagli) VALUES ($1, $2, $3)',
+      [req.utente.nome, 'NUOVO_COMMENTO', `Ha commentato la foto ID: ${foto_id}`]
+    );
 
     res.json(commentWithUser);
   } catch (err) {
     console.error('Errore inserimento commento:', err.message);
-    res.status(500).json({ msg: 'Errore del server durante l\'inserimento del commento', errore: err.message });
+    res.status(500).send('Errore del server');
   }
 });
 
@@ -56,18 +43,18 @@ router.post('/', authMiddleware, async (req, res) => {
 router.get('/:foto_id', authMiddleware, async (req, res) => {
   try {
     const comments = await pool.query(
-      `SELECT commenti.id, commenti.testo, commenti.utente_id, utenti.nome AS autore
+      `SELECT commenti.id, commenti.testo, commenti.data_creazione, commenti.utente_id, utenti.nome AS autore
        FROM commenti
        JOIN utenti ON commenti.utente_id = utenti.id
        WHERE commenti.foto_id = $1
-       ORDER BY commenti.id ASC`,
+       ORDER BY commenti.data_creazione ASC`,
       [req.params.foto_id]
     );
 
     res.json(comments.rows);
   } catch (err) {
     console.error('Errore recupero commenti:', err.message);
-    res.status(500).json({ msg: 'Errore del server durante il recupero dei commenti', errore: err.message });
+    res.status(500).send('Errore del server');
   }
 });
 
@@ -76,11 +63,6 @@ router.get('/:foto_id', authMiddleware, async (req, res) => {
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const commentId = req.params.id;
-    const utenteObj = req.utente || req.user || {};
-    const utenteId = utenteObj.id;
-    const utenteRuolo = utenteObj.ruolo;
-    const utenteNome = utenteObj.nome || 'Utente';
-
     const commentQuery = await pool.query('SELECT * FROM commenti WHERE id = $1', [commentId]);
 
     if (commentQuery.rows.length === 0) {
@@ -89,27 +71,23 @@ router.delete('/:id', authMiddleware, async (req, res) => {
 
     const commento = commentQuery.rows[0];
 
-    // Verifica permessi
-    if (commento.utente_id !== utenteId && utenteRuolo !== 'admin') {
+    // Verifica permessi: Autore del commento oppure Admin
+    if (commento.utente_id !== req.utente.id && req.utente.ruolo !== 'admin') {
       return res.status(403).json({ msg: 'Non autorizzato' });
     }
 
     await pool.query('DELETE FROM commenti WHERE id = $1', [commentId]);
 
     // Log Attività
-    try {
-      await pool.query(
-        'INSERT INTO registro_attivita (utente_nome, azione, dettagli) VALUES ($1, $2, $3)',
-        [utenteNome, utenteRuolo === 'admin' ? 'ELIMINAZIONE_COMMENTO_ADMIN' : 'ELIMINAZIONE_COMMENTO', `Eliminato commento ID: ${commentId}`]
-      );
-    } catch (logErr) {
-      console.error('⚠️ Log elimina commento fallito (ignorato):', logErr.message);
-    }
+    await pool.query(
+      'INSERT INTO registro_attivita (utente_nome, azione, dettagli) VALUES ($1, $2, $3)',
+      [req.utente.nome, req.utente.ruolo === 'admin' ? 'ELIMINAZIONE_COMMENTO_ADMIN' : 'ELIMINAZIONE_COMMENTO', `Eliminato commento ID: ${commentId}`]
+    );
 
     res.json({ msg: 'Commento eliminato' });
   } catch (err) {
     console.error('Errore eliminazione commento:', err.message);
-    res.status(500).json({ msg: 'Errore del server durante l\'eliminazione del commento', errore: err.message });
+    res.status(500).send('Errore del server');
   }
 });
 
